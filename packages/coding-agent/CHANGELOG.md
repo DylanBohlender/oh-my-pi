@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed extension `pasteToEditor` / `setEditorText` prompt mutations leaving the editor visually stale until the next keypress by scheduling an editor repaint after each extension-driven mutation. ([#4341](https://github.com/can1357/oh-my-pi/issues/4341))
+
 ## [16.3.2] - 2026-07-02
 
 ### Breaking Changes
