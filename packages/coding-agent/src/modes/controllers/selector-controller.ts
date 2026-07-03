@@ -1119,9 +1119,13 @@ export class SelectorController {
 			await this.ctx.session.modelRegistry.authStorage.login(providerId as OAuthProvider, {
 				onAuth: (info: { url: string; instructions?: string; launchUrl?: string }) => {
 					const block = new TranscriptBlock();
-					// Short /launch redirect when available: the full URL overflows the
-					// terminal grid and a clipped copy silently downgrades PKCE to "plain".
-					block.addChild(new Text(theme.fg("dim", info.launchUrl ?? info.url), 1, 0));
+					// Short /launch redirect first when available (immune to grid
+					// truncation, but only resolves on this machine), then the full
+					// URL for remote sessions where localhost points at the wrong host.
+					if (info.launchUrl) {
+						block.addChild(new Text(theme.fg("dim", info.launchUrl), 1, 0));
+					}
+					block.addChild(new Text(theme.fg("dim", info.url), 1, 0));
 					const hyperlink = `\x1b]8;;${info.url}\x07Click here to login\x1b]8;;\x07`;
 					block.addChild(new Text(theme.fg("accent", hyperlink), 1, 0));
 					if (info.instructions) {

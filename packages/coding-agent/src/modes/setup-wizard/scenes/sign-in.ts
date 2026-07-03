@@ -189,11 +189,15 @@ export class SignInTab implements SetupTab {
 			await this.#authStorage.login(providerId as OAuthProvider, {
 				signal: this.#loginAbort.signal,
 				onAuth: info => {
-					// Display/copy the short /launch redirect when available; the full
-					// URL still opens in the browser below. Clipped copies of the full
-					// URL silently downgrade PKCE to "plain" (RFC 7636 §4.3).
-					this.#authUrl = info.launchUrl ?? info.url;
+					// Keep the FULL auth URL as the display/clipboard target: OSC 52
+					// reaches the local clipboard even over SSH and clipboard bytes
+					// cannot be grid-truncated, while the /launch redirect below only
+					// resolves on this machine.
+					this.#authUrl = info.url;
 					this.#statusLines = [];
+					if (info.launchUrl) {
+						this.#statusLines.push(theme.fg("dim", `Short link (this machine): ${info.launchUrl}`));
+					}
 					if (info.instructions) {
 						this.#statusLines.push(theme.fg("warning", info.instructions));
 					}

@@ -74,7 +74,22 @@ function raceAbortSignal<T>(promise: Promise<T>, signal: AbortSignal, createErro
 	});
 }
 
-/** Renders the MCP OAuth fallback URL without hard-wrapping the copy target. */
+/**
+ * Renders the MCP OAuth fallback URLs.
+ *
+ * Two copy targets, because they fail in disjoint environments:
+ * - the short local `/launch` redirect cannot be truncated by the terminal
+ *   grid, but only resolves on the machine running OMP — copied into a
+ *   browser on another machine (SSH/headless sessions) it points at the
+ *   wrong host;
+ * - the full authorization URL works from anywhere, but rendered as a single
+ *   line it overflows the grid and `TUI#prepareLine` clips it with no
+ *   indicator — losing the trailing `code_challenge_method` parameter
+ *   silently downgrades PKCE to "plain" (RFC 7636 §4.3), which S256-only
+ *   providers reject. It is therefore hard-wrapped here into width-sized
+ *   rows so every character is visible; address bars strip the newlines a
+ *   multi-row terminal copy introduces.
+ */
 export class MCPAuthorizationLinkPrompt implements Component {
 	readonly #url: string;
 	readonly #launchUrl?: string;
@@ -86,18 +101,21 @@ export class MCPAuthorizationLinkPrompt implements Component {
 
 	invalidate(): void {}
 
-	render(_width: number): readonly string[] {
+	render(width: number): readonly string[] {
 		const link = urlHyperlinkAlways(this.#url, "Click here to authorize");
-		// Prefer the short local /launch redirect as the copy target: the full
-		// authorization URL overflows the terminal grid, and a copy that clips
-		// the trailing code_challenge_method parameter silently downgrades PKCE
-		// to "plain" (RFC 7636 §4.3), which S256-only providers reject.
-		const copyTarget = this.#launchUrl ?? this.#url;
-		return [
-			` ${theme.fg("success", "Open authorization URL:")}`,
-			` ${theme.fg("accent", link)}`,
-			` ${theme.fg("muted", `Copy URL: ${replaceTabs(copyTarget)}`)}`,
-		];
+		const lines = [` ${theme.fg("success", "Open authorization URL:")}`, ` ${theme.fg("accent", link)}`];
+		if (this.#launchUrl) {
+			lines.push(` ${theme.fg("muted", `Copy URL: ${replaceTabs(this.#launchUrl)}`)}`);
+			lines.push(` ${theme.fg("muted", "Remote session? Copy the full URL instead:")}`);
+		} else {
+			lines.push(` ${theme.fg("muted", "Copy the full URL:")}`);
+		}
+		const chunkWidth = Math.max(16, width - 2);
+		const url = replaceTabs(this.#url);
+		for (let i = 0; i < url.length; i += chunkWidth) {
+			lines.push(` ${theme.fg("muted", url.slice(i, i + chunkWidth))}`);
+		}
+		return lines;
 	}
 }
 
@@ -717,7 +735,10 @@ export class MCPCommandController {
 						block.addChild(new Text(theme.fg("accent", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"), 1, 0));
 						// Best-effort browser open. openPath never throws (it logs
 						// failures), so always present the manual fallback and stage
-						// the copy target on the clipboard.
+						// the FULL auth URL on the clipboard: OSC 52 writes to the
+						// local clipboard even over SSH, clipboard bytes cannot be
+						// truncated by the grid, and the /launch URL would resolve
+						// against the wrong host from a remote session.
 						openPath(info.url);
 						block.addChild(new Spacer(1));
 						block.addChild(new Text(theme.fg("success", "→ Opening browser automatically..."), 1, 0));
@@ -725,7 +746,7 @@ export class MCPCommandController {
 						block.addChild(new Text(theme.fg("muted", "Alternative if browser did not open:"), 1, 0));
 						block.addChild(new MCPAuthorizationLinkPrompt(info.url, info.launchUrl));
 						this.ctx.ui.requestRender();
-						void copyToClipboard(info.launchUrl ?? info.url)
+						void copyToClipboard(info.url)
 							.then(() => {
 								block.addChild(new Text(theme.fg("muted", "(URL copied to clipboard)"), 1, 0));
 								this.ctx.ui.requestRender();

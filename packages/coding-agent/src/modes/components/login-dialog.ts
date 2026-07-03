@@ -73,9 +73,13 @@ export class LoginDialogComponent extends Container {
 	showAuth(url: string, instructions?: string, launchUrl?: string): void {
 		this.#contentContainer.clear();
 		this.#contentContainer.addChild(new Spacer(1));
-		// Show the short /launch redirect when available: the full URL overflows
-		// the terminal grid and a clipped copy silently downgrades PKCE to "plain".
-		this.#contentContainer.addChild(new Text(theme.fg("accent", launchUrl ?? url), 1, 0));
+		// Full URL stays the primary target (works from remote sessions); the
+		// short /launch redirect is a local-machine convenience immune to grid
+		// truncation.
+		this.#contentContainer.addChild(new Text(theme.fg("accent", url), 1, 0));
+		if (launchUrl) {
+			this.#contentContainer.addChild(new Text(theme.fg("dim", `Short link (this machine): ${launchUrl}`), 1, 0));
+		}
 
 		const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
 		const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;
