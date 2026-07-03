@@ -31,6 +31,38 @@ function getExistingWslLocalPath(urlOrPath: string): string | undefined {
 	}
 }
 
+/**
+ * Windows opener command. PowerShell's `Start-Process` routes through
+ * ShellExecute like the previous `rundll32 url.dll,FileProtocolHandler`, but
+ * handles URLs, files, and directories uniformly and reports failure through
+ * its exit code (rundll32 always exits 0).
+ *
+ * PowerShell is resolved from %SystemRoot% because PATH is user-editable and
+ * System32 is not guaranteed to be on it — seen in the wild as
+ * `Bun.spawn("rundll32")` throwing "Executable not found in $PATH", which left
+ * OAuth flows browserless (and pushed users onto hand-copying authorization
+ * URLs that terminals truncate). `-EncodedCommand` sidesteps shell
+ * metacharacter parsing entirely: OAuth URLs carry `&`, which bare
+ * cmd/PowerShell command lines treat as a separator. Inside the decoded
+ * script the target is a single-quoted PowerShell literal (no `$` expansion);
+ * embedded single quotes are doubled.
+ */
+function windowsOpenCommand(urlOrPath: string): string[] {
+	const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? "C:\\Windows";
+	const absolutePowershell = path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+	const powershell = fs.existsSync(absolutePowershell) ? absolutePowershell : "powershell.exe";
+	const script = `Start-Process '${urlOrPath.replaceAll("'", "''")}'`;
+	return [
+		powershell,
+		"-NoProfile",
+		"-NonInteractive",
+		"-WindowStyle",
+		"Hidden",
+		"-EncodedCommand",
+		Buffer.from(script, "utf16le").toString("base64"),
+	];
+}
+
 /** Open a URL or file path in the default browser/application. Best-effort, never throws. */
 export function openPath(urlOrPath: string): void {
 	let cmd: string[];
@@ -39,7 +71,7 @@ export function openPath(urlOrPath: string): void {
 			cmd = ["open", urlOrPath];
 			break;
 		case "win32":
-			cmd = ["rundll32", "url.dll,FileProtocolHandler", urlOrPath];
+			cmd = windowsOpenCommand(urlOrPath);
 			break;
 		default: {
 			const wslPath = getExistingWslLocalPath(urlOrPath);
@@ -48,8 +80,16 @@ export function openPath(urlOrPath: string): void {
 		}
 	}
 	try {
-		Bun.spawn(cmd, { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-	} catch {
-		// Best-effort: browser opening is non-critical
+		const proc = Bun.spawn(cmd, { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+		void proc.exited.then(exitCode => {
+			if (exitCode !== 0) {
+				piUtils.logger.warn("openPath: opener exited with non-zero status", { opener: cmd[0], exitCode });
+			}
+		});
+	} catch (error) {
+		// Best-effort: browser opening is non-critical. Log so a broken opener
+		// (e.g. executable not resolvable from a stripped PATH) stays diagnosable
+		// instead of failing silently while the UI claims the browser opened.
+		piUtils.logger.warn("openPath: failed to spawn opener", { opener: cmd[0], error: String(error) });
 	}
 }

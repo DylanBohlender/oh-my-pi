@@ -189,7 +189,10 @@ export class SignInTab implements SetupTab {
 			await this.#authStorage.login(providerId as OAuthProvider, {
 				signal: this.#loginAbort.signal,
 				onAuth: info => {
-					this.#authUrl = info.url;
+					// Display/copy the short /launch redirect when available; the full
+					// URL still opens in the browser below. Clipped copies of the full
+					// URL silently downgrade PKCE to "plain" (RFC 7636 §4.3).
+					this.#authUrl = info.launchUrl ?? info.url;
 					this.#statusLines = [];
 					if (info.instructions) {
 						this.#statusLines.push(theme.fg("warning", info.instructions));

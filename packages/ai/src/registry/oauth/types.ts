@@ -25,6 +25,15 @@ export type OAuthPrompt = {
 export type OAuthAuthInfo = {
 	url: string;
 	instructions?: string;
+	/**
+	 * Short loopback URL served by the flow's local callback server that
+	 * 302-redirects to {@link url}. Long authorization URLs get clipped or
+	 * hard-wrapped by terminal grids when the browser fails to open, and a
+	 * copy that silently drops the trailing `code_challenge_method` parameter
+	 * downgrades PKCE to `plain` (RFC 7636 §4.3), which S256-only providers
+	 * reject. UIs should surface this as the copy target when present.
+	 */
+	launchUrl?: string;
 };
 
 export interface OAuthProviderInfo {

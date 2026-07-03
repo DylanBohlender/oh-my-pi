@@ -70,10 +70,12 @@ export class LoginDialogComponent extends Container {
 	/**
 	 * Called by onAuth callback - show URL and optional instructions
 	 */
-	showAuth(url: string, instructions?: string): void {
+	showAuth(url: string, instructions?: string, launchUrl?: string): void {
 		this.#contentContainer.clear();
 		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("accent", url), 1, 0));
+		// Show the short /launch redirect when available: the full URL overflows
+		// the terminal grid and a clipped copy silently downgrades PKCE to "plain".
+		this.#contentContainer.addChild(new Text(theme.fg("accent", launchUrl ?? url), 1, 0));
 
 		const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
 		const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;

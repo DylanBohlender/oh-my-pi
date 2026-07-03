@@ -43,6 +43,7 @@ import {
 import type { MCPAuthConfig, MCPServerConfig, MCPServerConnection } from "../../mcp/types";
 import { shortenPath } from "../../tools/render-utils";
 import { urlHyperlinkAlways } from "../../tui";
+import { copyToClipboard } from "../../utils/clipboard";
 import { openPath } from "../../utils/open";
 import { ChatBlock } from "../components/chat-block";
 import { MCPAddWizard } from "../components/mcp-add-wizard";
@@ -76,19 +77,26 @@ function raceAbortSignal<T>(promise: Promise<T>, signal: AbortSignal, createErro
 /** Renders the MCP OAuth fallback URL without hard-wrapping the copy target. */
 export class MCPAuthorizationLinkPrompt implements Component {
 	readonly #url: string;
+	readonly #launchUrl?: string;
 
-	constructor(url: string) {
+	constructor(url: string, launchUrl?: string) {
 		this.#url = url;
+		this.#launchUrl = launchUrl;
 	}
 
 	invalidate(): void {}
 
 	render(_width: number): readonly string[] {
 		const link = urlHyperlinkAlways(this.#url, "Click here to authorize");
+		// Prefer the short local /launch redirect as the copy target: the full
+		// authorization URL overflows the terminal grid, and a copy that clips
+		// the trailing code_challenge_method parameter silently downgrades PKCE
+		// to "plain" (RFC 7636 §4.3), which S256-only providers reject.
+		const copyTarget = this.#launchUrl ?? this.#url;
 		return [
 			` ${theme.fg("success", "Open authorization URL:")}`,
 			` ${theme.fg("accent", link)}`,
-			` ${theme.fg("muted", `Copy URL: ${replaceTabs(this.#url)}`)}`,
+			` ${theme.fg("muted", `Copy URL: ${replaceTabs(copyTarget)}`)}`,
 		];
 	}
 }
@@ -689,7 +697,7 @@ export class MCPCommandController {
 					stripSameOriginResource: opts?.stripSameOriginResource,
 				},
 				{
-					onAuth: (info: { url: string; instructions?: string }) => {
+					onAuth: (info: { url: string; instructions?: string; launchUrl?: string }) => {
 						// Show auth URL prominently in chat as one block
 						const block = new TranscriptBlock();
 						this.ctx.present(block);
@@ -707,24 +715,22 @@ export class MCPCommandController {
 						block.addChild(new Text(theme.fg("muted", MCP_MANUAL_LOGIN_TIP), 1, 0));
 						block.addChild(new Spacer(1));
 						block.addChild(new Text(theme.fg("accent", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"), 1, 0));
-						// Try to open browser automatically
-						try {
-							openPath(info.url);
-
-							// Show confirmation that browser should open
-							block.addChild(new Spacer(1));
-							block.addChild(new Text(theme.fg("success", "→ Opening browser automatically..."), 1, 0));
-							block.addChild(new Spacer(1));
-							block.addChild(new Text(theme.fg("muted", "Alternative if browser did not open:"), 1, 0));
-							block.addChild(new MCPAuthorizationLinkPrompt(info.url));
-							this.ctx.ui.requestRender();
-						} catch (_error) {
-							// Show error if browser doesn't open
-							block.addChild(new Spacer(1));
-							block.addChild(new Text(theme.fg("warning", "→ Could not open browser automatically"), 1, 0));
-							block.addChild(new MCPAuthorizationLinkPrompt(info.url));
-							this.ctx.ui.requestRender();
-						}
+						// Best-effort browser open. openPath never throws (it logs
+						// failures), so always present the manual fallback and stage
+						// the copy target on the clipboard.
+						openPath(info.url);
+						block.addChild(new Spacer(1));
+						block.addChild(new Text(theme.fg("success", "→ Opening browser automatically..."), 1, 0));
+						block.addChild(new Spacer(1));
+						block.addChild(new Text(theme.fg("muted", "Alternative if browser did not open:"), 1, 0));
+						block.addChild(new MCPAuthorizationLinkPrompt(info.url, info.launchUrl));
+						this.ctx.ui.requestRender();
+						void copyToClipboard(info.launchUrl ?? info.url)
+							.then(() => {
+								block.addChild(new Text(theme.fg("muted", "(URL copied to clipboard)"), 1, 0));
+								this.ctx.ui.requestRender();
+							})
+							.catch(() => {});
 					},
 					onProgress: (message: string) => {
 						this.ctx.present([new Spacer(1), new Text(theme.fg("muted", message), 1, 0)]);
@@ -2041,11 +2047,7 @@ export class MCPCommandController {
 				"",
 			].join("\n"),
 		);
-		try {
-			openPath(session.authUrl);
-		} catch {
-			// URL is already shown above.
-		}
+		openPath(session.authUrl);
 
 		const apiKey = await this.#waitForSmitheryCliApiKey(session.sessionId, new AbortController().signal);
 		await this.#validateSmitheryApiKey(apiKey);

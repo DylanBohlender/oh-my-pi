@@ -17,6 +17,15 @@ import type { OAuthController, OAuthCredentials } from "./types";
 const DEFAULT_TIMEOUT = 300_000;
 const DEFAULT_HOSTNAME = "localhost";
 const CALLBACK_PATH = "/callback";
+/**
+ * Path serving a 302 redirect to the pending authorization URL. Gives UIs a
+ * short copy-safe target: the full authorization URL carries the PKCE
+ * `code_challenge_method` as its trailing query parameter, and a terminal
+ * copy that clips it silently downgrades the flow to `plain` PKCE (RFC 7636
+ * §4.3), which S256-only providers reject. The URL holds no secrets (it is
+ * handed to the browser anyway) and the route dies with the callback server.
+ */
+const LAUNCH_PATH = "/launch";
 
 export type CallbackResult = { code: string; state: string };
 
@@ -54,6 +63,8 @@ export abstract class OAuthCallbackFlow {
 	allowPortFallback: boolean;
 	#callbackResolve?: (result: CallbackResult) => void;
 	#callbackReject?: (error: string) => void;
+	/** Authorization URL served via {@link LAUNCH_PATH} while the flow is pending. */
+	#pendingAuthUrl?: string;
 
 	constructor(
 		ctrl: OAuthController,
@@ -128,8 +139,16 @@ export abstract class OAuthCallbackFlow {
 			const { url: authUrl, instructions } = await this.generateAuthUrl(state, redirectUri);
 			this.#throwIfCancelled();
 
+			// Advertise a short local redirect as the copy target unless the
+			// provider's callback is itself configured at LAUNCH_PATH.
+			let launchUrl: string | undefined;
+			if (this.callbackPath !== LAUNCH_PATH) {
+				this.#pendingAuthUrl = authUrl;
+				launchUrl = `http://${this.callbackHostname}:${server.port}${LAUNCH_PATH}`;
+			}
+
 			// Notify controller that auth is ready
-			this.ctrl.onAuth?.({ url: authUrl, instructions });
+			this.ctrl.onAuth?.({ url: authUrl, instructions, launchUrl });
 			this.ctrl.onProgress?.("Waiting for browser authentication...");
 
 			// Wait for callback or manual input
@@ -140,6 +159,7 @@ export abstract class OAuthCallbackFlow {
 
 			return await this.exchangeToken(code, state, redirectUri);
 		} finally {
+			this.#pendingAuthUrl = undefined;
 			server.stop();
 		}
 	}
@@ -196,6 +216,9 @@ export abstract class OAuthCallbackFlow {
 		const url = new URL(req.url);
 
 		if (url.pathname !== this.callbackPath) {
+			if (url.pathname === LAUNCH_PATH && this.#pendingAuthUrl) {
+				return new Response(null, { status: 302, headers: { Location: this.#pendingAuthUrl } });
+			}
 			return new Response("Not Found", { status: 404 });
 		}
 
