@@ -15,10 +15,14 @@ function chunksAfter(lines: readonly string[], marker: string): string[] {
 	expect(markerIndex).toBeGreaterThanOrEqual(0);
 	const chunks = lines.slice(markerIndex + 1);
 	expect(chunks.length).toBeGreaterThan(1);
+	// Continuation rows must carry ZERO leading bytes: a multi-row terminal
+	// selection includes the newline plus any indent, and address bars strip
+	// newlines but preserve/encode embedded spaces — an indent corrupts the
+	// URL at every chunk boundary. Reassembly is therefore raw, no stripping.
 	for (const chunk of chunks) {
-		expect(chunk.startsWith(" ")).toBe(true);
+		expect(chunk.startsWith(" ")).toBe(false);
 	}
-	return chunks.map(chunk => chunk.slice(1));
+	return chunks;
 }
 
 function expectEveryPlainLineFits(lines: readonly string[], width: number): void {

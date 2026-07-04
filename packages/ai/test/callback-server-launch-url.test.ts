@@ -98,4 +98,40 @@ describe("OAuthCallbackFlow launch URL", () => {
 			expires: 1_234_567_890,
 		});
 	});
+
+	it("suppresses the launch URL when the redirect never returns to the local callback server", async () => {
+		const auth = captureAuth();
+		const flow = new LaunchTestFlow(
+			{
+				onAuth: auth.onAuth,
+				signal: AbortSignal.timeout(2_000),
+			},
+			{ preferredPort: 14603, redirectUri: "vscode://gitlab.gitlab-workflow/authentication" },
+		);
+
+		const loginPromise = flow.login();
+		const authInfo = await auth.promise;
+
+		// A custom-scheme redirect never touches the loopback server, so a
+		// localhost /launch URL would misrepresent the callback endpoint.
+		expect(authInfo.launchUrl).toBeUndefined();
+		expect(flow.generated?.redirectUri).toBe("vscode://gitlab.gitlab-workflow/authentication");
+
+		// The launch route stays dark for such flows.
+		const launchResponse = await fetch("http://localhost:14603/launch", { redirect: "manual" });
+		expect(launchResponse.status).toBe(404);
+
+		// The local server still resolves a callback delivered to it directly.
+		if (!flow.generated) throw new Error("generateAuthUrl was not called");
+		const callbackResponse = await fetch(
+			`http://localhost:14603/callback?code=external-code&state=${encodeURIComponent(flow.generated.state)}`,
+		);
+		expect(callbackResponse.status).toBe(200);
+
+		await expect(loginPromise).resolves.toEqual({
+			access: "access-external-code",
+			refresh: "refresh-token",
+			expires: 1_234_567_890,
+		});
+	});
 });

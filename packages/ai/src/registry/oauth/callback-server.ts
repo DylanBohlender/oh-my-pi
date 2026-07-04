@@ -139,10 +139,23 @@ export abstract class OAuthCallbackFlow {
 			const { url: authUrl, instructions } = await this.generateAuthUrl(state, redirectUri);
 			this.#throwIfCancelled();
 
-			// Advertise a short local redirect as the copy target unless the
-			// provider's callback is itself configured at LAUNCH_PATH.
+			// Advertise a short local redirect as the copy target only when the
+			// flow's redirect actually returns to this local callback server. A
+			// fixed non-loopback / custom-scheme redirectUri (e.g. GitLab Duo's
+			// vscode:// URI) never touches this server, so a localhost /launch
+			// URL would misrepresent the callback endpoint — and the provider's
+			// callback path itself must never be shadowed by the launch route.
+			let redirectIsLoopback = false;
+			try {
+				const parsed = new URL(redirectUri);
+				redirectIsLoopback =
+					(parsed.protocol === "http:" || parsed.protocol === "https:") &&
+					(parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]");
+			} catch {
+				// Malformed redirect URI — never advertise a launch shortcut for it.
+			}
 			let launchUrl: string | undefined;
-			if (this.callbackPath !== LAUNCH_PATH) {
+			if (this.callbackPath !== LAUNCH_PATH && redirectIsLoopback) {
 				this.#pendingAuthUrl = authUrl;
 				launchUrl = `http://${this.callbackHostname}:${server.port}${LAUNCH_PATH}`;
 			}

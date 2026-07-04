@@ -87,8 +87,11 @@ function raceAbortSignal<T>(promise: Promise<T>, signal: AbortSignal, createErro
  *   indicator — losing the trailing `code_challenge_method` parameter
  *   silently downgrades PKCE to "plain" (RFC 7636 §4.3), which S256-only
  *   providers reject. It is therefore hard-wrapped here into width-sized
- *   rows so every character is visible; address bars strip the newlines a
- *   multi-row terminal copy introduces.
+ *   rows so every character is visible. Continuation rows carry NO leading
+ *   indent: a multi-row terminal selection includes the newline plus any
+ *   leading characters, and while address bars strip newlines they preserve
+ *   or percent-encode embedded spaces — an indent would corrupt the URL at
+ *   every chunk boundary.
  */
 export class MCPAuthorizationLinkPrompt implements Component {
 	readonly #url: string;
@@ -110,10 +113,12 @@ export class MCPAuthorizationLinkPrompt implements Component {
 		} else {
 			lines.push(` ${theme.fg("muted", "Copy the full URL:")}`);
 		}
-		const chunkWidth = Math.max(16, width - 2);
+		// Full width for chunk rows — they are intentionally unindented so a
+		// multi-row copy reassembles to the exact URL bytes.
+		const chunkWidth = Math.max(16, width);
 		const url = replaceTabs(this.#url);
 		for (let i = 0; i < url.length; i += chunkWidth) {
-			lines.push(` ${theme.fg("muted", url.slice(i, i + chunkWidth))}`);
+			lines.push(theme.fg("muted", url.slice(i, i + chunkWidth)));
 		}
 		return lines;
 	}
